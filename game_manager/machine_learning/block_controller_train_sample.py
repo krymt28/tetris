@@ -109,6 +109,7 @@ class Block_Controller(object):
             self.get_next_func = self.get_next_states_v2
             self.reward_func = self.step_v2
             self.reward_weight = cfg["train"]["reward_weight"]
+            #print(self.initial_state)ここは最初に1回だけ通る
 
         if self.mode=="predict" or self.mode=="predict_sample":
             if not predict_weight=="None":
@@ -169,9 +170,16 @@ class Block_Controller(object):
         self.max_score = -99999
         self.epoch_reward = 0
         self.cleared_lines = 0
+        self.cleared_lines_s = [0,0,0,0,0,0] ###
         self.iter = 0 
         self.state = self.initial_state 
         self.tetrominoes = 0
+        self.hole_num_prev = 0 ###
+        self.rebamp = 0
+        self.remaxhi = 0
+        self.rethhi = 0
+        self.holedelt = 0
+
         
         self.gamma = cfg["train"]["gamma"]
         self.reward_clipping = cfg["train"]["reward_clipping"]
@@ -295,13 +303,21 @@ class Block_Controller(object):
                 if self.scheduler!=None:
                     self.scheduler.step()
                 
-                log = "Epoch: {} / {}, Score: {},  block: {},  Reward: {:.1f} Cleared lines: {}".format(
+                log = "E {} / {}, S: {},  blk: {},  Re: {:.1f} lines: {} : {}, {}, {}, {}, rbanm: {} rhim {} rhith {} rholde {}".format(
                     self.epoch,
                     self.num_epochs,
                     self.score,
                     self.tetrominoes,
                     self.epoch_reward,
-                    self.cleared_lines
+                    self.cleared_lines,
+                    self.cleared_lines_s[0],
+                    self.cleared_lines_s[1],
+                    self.cleared_lines_s[2],
+                    self.cleared_lines_s[3],
+                    self.rebamp,
+                    self.remaxhi,
+                    self.rethhi,
+                    self.holedelt
                     )
                 print(log)
                 with open(self.log,"a") as f:
@@ -333,7 +349,7 @@ class Block_Controller(object):
                 exit() 
         else:
             self.epoch += 1
-            log = "Epoch: {} / {}, Score: {},  block: {}, Reward: {:.1f} Cleared lines: {}".format(
+            log = "Epoch: {} / {}, Score: {},  block: {}, Reward: {:.1f} Cleared lines: {}, ".format(
             self.epoch,
             self.num_epochs,
             self.score,
@@ -356,6 +372,13 @@ class Block_Controller(object):
         self.cleared_lines = 0
         self.epoch_reward = 0
         self.tetrominoes = 0
+        self.cleared_lines_s = [0,0,0,0,0,0] #一回での消去段数
+        self.hole_num_prev = 0
+        self.rebamp = 0
+        self.remaxhi = 0
+        self.rethhi = 0
+        self.holedelt = 0
+
             
     #削除される列を数える
     def check_cleared_rows(self,board):
@@ -390,7 +413,7 @@ class Block_Controller(object):
             row = 0
             while row < self.height and col[row] == 0:
                 row += 1
-            num_holes += len([x for x in col[row + 1:] if x == 0])
+            num_holes += (len([x for x in col[row + 1:] if x == 0]))**2     ###
         return num_holes
 
     #
@@ -412,6 +435,7 @@ class Block_Controller(object):
         sum_ = np.sum(board,axis=1)
         row = 0
         while row < self.height and sum_[row] ==0:
+            #print(self.height, sum_[row])  ###
             row += 1
         return self.height - row
 
@@ -464,22 +488,78 @@ class Block_Controller(object):
 
     #報酬を計算(2次元用) 
     def step_v2(self, curr_backboard,action,curr_shape_class):
+        #print(curr_backboard,action,curr_shape_class)
         x0, direction0 = action
         board = self.getBoard(curr_backboard, curr_shape_class, direction0, x0)
         board = self.get_reshape_backboard(board)
         bampiness,height = self.get_bumpiness_and_height(board)
         max_height = self.get_max_height(board)
         hole_num = self.get_holes(board)
+        hole_num_delta = (hole_num - self.hole_num_prev)# * abs(hole_num - self.hole_num_prev)  ###
         lines_cleared, board = self.check_cleared_rows(board)
+
+        ###高さ閾値
+        height_thresh = 22  #height_thresh_reward
+        if max_height < height_thresh:
+            height_reward = -1
+        else:
+            height_reward = max_height - height_thresh
+        height_th = 0 * height_reward #height_thresh_reward
+
         reward = self.reward_list[lines_cleared] 
         reward -= self.reward_weight[0] *bampiness 
         reward -= self.reward_weight[1] * max(0,max_height)
-        reward -= self.reward_weight[2] * hole_num
+        reward -= height_th
+        reward -= self.reward_weight[2] * hole_num_delta
+
+        
 
         self.epoch_reward += reward 
         self.score += self.score_list[lines_cleared]
         self.cleared_lines += lines_cleared
         self.tetrominoes += 1
+        
+        #Rewards の内容表示
+        self.rebamp += self.reward_weight[0] *bampiness
+        self.remaxhi += self.reward_weight[1] * max(0,max_height)
+        self.rethhi  += height_th
+        self.holedelt += self.reward_weight[2] * hole_num_delta
+        
+
+
+
+
+        #"""
+        #print(
+        #height_reward
+        #max(0,max_height),
+        #hole_num,
+        #self.hole_num_prev,
+        #hole_num_delta,
+        #lines_cleared,
+        #self.reward_list[lines_cleared],
+        #bampiness,
+        #self.reward_weight[0] *bampiness,
+        #self.reward_weight[1] * max(0,max_height),
+        #self.reward_weight[2] * hole_num_delta,
+        #reward
+        #)
+        #"""
+        self.hole_num_prev = hole_num
+
+        
+        #print(lines_cleared )
+        if lines_cleared == 1:
+            self.cleared_lines_s[0] += 1
+        elif lines_cleared ==2:
+            self.cleared_lines_s[1] += 1
+        elif lines_cleared ==3:
+            self.cleared_lines_s[2] += 1
+        elif lines_cleared ==4:
+            self.cleared_lines_s[3] += 1
+
+
+
         return reward
 
     #報酬を計算(1次元用) 
@@ -529,7 +609,7 @@ class Block_Controller(object):
             random_action = u <= epsilon
             next_actions, next_states = zip(*next_steps.items())
             next_states = torch.stack(next_states)
-                       
+            #print(epsilon,random_action)#### 時々random_actionがTrueになる
             if torch.cuda.is_available():
                 next_states = next_states.cuda()
         
@@ -544,14 +624,15 @@ class Block_Controller(object):
             next_state = next_states[index, :]
             action = next_actions[index]
             reward = self.reward_func(curr_backboard,action,curr_shape_class)
-            
+            #print(reward)###
+
             done = False #game over flag
             
             #======predict max_a Q(s_(t+1),a)======
             #if use double dqn, predicted by main model
             if self.double_dqn:
                 next_backboard  = self.getBoard(curr_backboard, curr_shape_class, action[1], action[0])
-                next２_steps =self.get_next_func(next_backboard,next_piece_id,next_shape_class)
+                next2_steps =self.get_next_func(next_backboard,next_piece_id,next_shape_class)
                 next2_actions, next2_states = zip(*next２_steps.items())
                 next2_states = torch.stack(next2_states)
                 if torch.cuda.is_available():
@@ -565,7 +646,7 @@ class Block_Controller(object):
             #if use target net, predicted by target model
             elif self.target_net:
                 next_backboard  = self.getBoard(curr_backboard, curr_shape_class, action[1], action[0])
-                next２_steps =self.get_next_func(next_backboard,next_piece_id,next_shape_class)
+                next2_steps =self.get_next_func(next_backboard,next_piece_id,next_shape_class)
                 next2_actions, next2_states = zip(*next２_steps.items())
                 next2_states = torch.stack(next2_states)
                 if torch.cuda.is_available():
