@@ -25,8 +25,14 @@ class MLP(nn.Module):
 class DeepQNetwork(nn.Module):
     def __init__(self):
         super(DeepQNetwork, self).__init__()
+
+        self.conv0 = nn.Sequential(
+                nn.Conv2d(1,32, kernel_size=5, stride=1,padding=2,
+                padding_mode='zeros',bias=False),
+                nn.ReLU())
+
         self.conv1 = nn.Sequential(
-                nn.Conv2d(1,32, kernel_size=4, stride=2,padding=1,
+                nn.Conv2d(32,32, kernel_size=4, stride=2,padding=1,  #1->32
                 padding_mode='zeros',bias=False),
                 nn.ReLU())
         
@@ -53,6 +59,7 @@ class DeepQNetwork(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
+        x = self.conv0(x) #add
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)    
